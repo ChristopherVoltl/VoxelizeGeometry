@@ -17,9 +17,9 @@ namespace VoxelizeGeometry
         /// </summary>
         
         public VoxelizeGeometryComponent()
-          : base("UniformVoxelize", "Voxel",
-            "Description",
-            "FGAM", "Voxelize")
+          : base("Cube-a-saurus", "CAS",
+            "A prehistoric beast that only eats geometry and spits out voxels",
+            "FGAM", "Cube-a-saurus")
         {
         }
 
@@ -260,7 +260,7 @@ namespace VoxelizeGeometry
         protected override System.Drawing.Bitmap Icon
         {             get
             {
-                return Properties.Resources.UniformVoxelizeIcon;
+                return Properties.Resources.voxelizeGeo_icon;
             }
         }
 

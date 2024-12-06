@@ -63,9 +63,9 @@ namespace VoxelizeGeometry.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
-        internal static System.Drawing.Bitmap UniformVoxelizeIcon {
+        internal static System.Drawing.Bitmap voxelizeGeo_icon {
             get {
-                object obj = ResourceManager.GetObject("UniformVoxelizeIcon", resourceCulture);
+                object obj = ResourceManager.GetObject("voxelizeGeo_icon", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }

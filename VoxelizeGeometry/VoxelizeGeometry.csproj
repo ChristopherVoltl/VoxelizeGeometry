@@ -8,6 +8,14 @@
     <TargetExt>.gha</TargetExt>
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
+	
+  <ItemGroup>
+    <None Remove="Resources\voxelizeGeo_icon.png" />
+  </ItemGroup>
+	
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\voxelizeGeo_icon.png" />
+  </ItemGroup>
 
   
   <ItemGroup>
