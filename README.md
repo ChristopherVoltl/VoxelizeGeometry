@@ -62,3 +62,5 @@ What does this component do?
 
   - Evaluates Breps based on their vertices, centroid, and optionally sampled surface points to ensure comprehensive containment analysis.
 
+![Component Features](https://github.com/ChristopherVoltl/VoxelizeGeometry/blob/master/assets/1Artboard%201-100.jpg)
+
