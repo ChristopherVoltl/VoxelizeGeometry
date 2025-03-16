@@ -4,7 +4,7 @@ using Rhino.Geometry;
 using System;
 using System.Collections.Generic;
 
-namespace VoxelizeGeometry
+namespace SpatialGeneration
 {
     public class VoxelizeGeometryComponent : GH_Component
     {
