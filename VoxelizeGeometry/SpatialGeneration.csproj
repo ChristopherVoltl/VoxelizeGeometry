@@ -20,6 +20,8 @@
   
   <ItemGroup>
     <PackageReference Include="Grasshopper" Version="8.16.25042.13001" IncludeAssets="compile;build" />
+    <PackageReference Include="HelixToolkit" Version="2.26.0" />
+    <PackageReference Include="HelixToolkit.SharpDX.Core" Version="2.26.0" />
     <PackageReference Include="RhinoCommon" Version="8.16.25042.13001" />
     <PackageReference Include="System.Drawing.Common" Version="7.0.0" />
   </ItemGroup>
@@ -27,6 +29,18 @@
   <ItemGroup>
     <Reference Include="Grasshopper">
       <HintPath>C:\Program Files\Rhino 8\Plug-ins\Grasshopper\Grasshopper.dll</HintPath>
+    </Reference>
+    <Reference Include="HelixToolkit">
+      <HintPath>C:\Users\Chris\.nuget\packages\helixtoolkit\2.26.0\lib\netstandard2.0\HelixToolkit.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HelixToolkit.SharpDX.Core">
+      <HintPath>C:\Users\Chris\.nuget\packages\helixtoolkit.sharpdx.core\2.26.0\lib\netstandard2.0\HelixToolkit.SharpDX.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="MIConvexHull">
+      <HintPath>C:\Users\Chris\.nuget\packages\miconvexhull\1.1.19.1018\lib\netstandard2.0\MIConvexHull.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="RhinoCommon">
       <HintPath>C:\Program Files\Rhino 8\System\RhinoCommon.dll</HintPath>

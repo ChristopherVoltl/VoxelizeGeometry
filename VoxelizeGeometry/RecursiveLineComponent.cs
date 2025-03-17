@@ -1,9 +1,12 @@
 ﻿using Grasshopper;
 using Grasshopper.Kernel;
+using Rhino;
 using Rhino.Geometry;
 using System;
 using System.Collections.Generic;
-using System.Security.Cryptography;
+using HelixToolkit.SharpDX.Core.Model.Scene;
+using HelixToolkit.SharpDX.Core.Utilities;
+using System.Numerics;
 
 namespace SpatialGeneration
 {
@@ -31,6 +34,8 @@ namespace SpatialGeneration
         {
             pManager.AddCurveParameter("Curve", "C", "Input Curves", GH_ParamAccess.list);
             pManager.AddNumberParameter("Maximum Edge Length", "MEL", "Max Length of Edge", GH_ParamAccess.item, 6.0);
+            pManager.AddNumberParameter("Voxel Size", "VS", "Size of Voxel", GH_ParamAccess.item, 1.0);
+
         }
 
         /// <summary>
@@ -39,8 +44,9 @@ namespace SpatialGeneration
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
         {
             pManager.AddCurveParameter("All Curves", "C", "Generated Split Curves", GH_ParamAccess.list);
-        }
+            pManager.AddBoxParameter("Voxel", "V", "Generated Approximate Voxel", GH_ParamAccess.list);
 
+        }
 
         // Method to split a curve if it exceeds max length
         Curve[] SplitCurveIfTooLong(Curve curve, double maxLength, out Point3d splitPt)
@@ -138,6 +144,7 @@ namespace SpatialGeneration
                 }
 
                 splitCurves = nextGen;
+                splitPoints.Clear();
                 iteration++;
             }
             FinalCrvs.AddRange(splitCurves);
@@ -149,11 +156,18 @@ namespace SpatialGeneration
             return allCurves;
         }
 
+        public static float ToSingle(double value)
+        {
+            return (float)value;
+        }
+
         protected override void SolveInstance(IGH_DataAccess DA)
         {
             // Input initialization
             List<Curve> crvs = new List<Curve>();
             double max_edge_length = 6.0;
+            // Create a voxel grid
+            double voxelSize = 1.0;
 
             // Check and retrieve input
             if (!DA.GetDataList(0, crvs))
@@ -163,11 +177,48 @@ namespace SpatialGeneration
             }
 
             if (!DA.GetData(1, ref max_edge_length)) return;
+            if (!DA.GetData(2, ref voxelSize)) return;
 
             var result = ProcessCurves(crvs, max_edge_length);
 
-            DA.SetDataList(0, result);
+
+            List<Point3d> pts = new List<Point3d>();
+
+            // Sample points densely from curves
+            foreach (Curve crv in result)
+            {
+                double length = crv.GetLength();
+                int divisions = 10; //Math.Max(5, (int)(length / 0.1)); // Adjust the sampling density as needed
+                Point3d[] sampledPts;
+                crv.DivideByCount(divisions, true, out sampledPts);
+                pts.AddRange(sampledPts);
+            }
         
+            
+            voxelSize = ToSingle(voxelSize);
+
+            var voxel = new List<Box>();
+            var grid = new HashSet<Vector3>();
+            foreach (var pt in pts)
+            {
+                
+                Rhino.Geometry.Plane plane = new Rhino.Geometry.Plane(pt, Vector3d.ZAxis);
+                var xInterval = new Interval(-voxelSize / 2, voxelSize / 2);
+                var yInterval = new Interval(-voxelSize / 2, voxelSize / 2);
+                var zInterval = new Interval(-voxelSize / 2, voxelSize / 2);
+                var box = new Box(plane, xInterval, yInterval, zInterval);
+                voxel.Add(box);
+              
+            }
+            // Compute convex hull
+            //Mesh convexHullMesh = Mesh.CreateConvexHull3D(pts, out hullFacets, RhinoDoc.ActiveDoc.ModelAbsoluteTolerance, RhinoDoc.ActiveDoc.ModelAbsoluteTolerance);
+
+
+            DA.SetDataList(0, result);
+            DA.SetDataList(1, voxel);
+
+
+
         }
 
         /// <summary>
