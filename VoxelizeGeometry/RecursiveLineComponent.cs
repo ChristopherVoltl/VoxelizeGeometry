@@ -34,7 +34,7 @@ namespace SpatialGeneration
         {
             pManager.AddCurveParameter("Curve", "C", "Input Curves", GH_ParamAccess.list);
             pManager.AddNumberParameter("Maximum Edge Length", "MEL", "Max Length of Edge", GH_ParamAccess.item, 6.0);
-            pManager.AddNumberParameter("Voxel Size", "VS", "Size of Voxel", GH_ParamAccess.item, 1.0);
+            pManager.AddNumberParameter("Voxel Size", "VS", "Size of Voxel", GH_ParamAccess.item, .0);
 
         }
 
