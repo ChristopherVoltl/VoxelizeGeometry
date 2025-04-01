@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using HelixToolkit.SharpDX.Core.Model.Scene;
 using HelixToolkit.SharpDX.Core.Utilities;
 using System.Numerics;
+using System.Linq;
 
 namespace SpatialGeneration
 {
@@ -91,10 +92,10 @@ namespace SpatialGeneration
         List<Curve> ProcessCurves(List<Curve> curves, double maxLength)
         {
             var splitCurves = new List<Curve>();
-            var FinalCrvs = new List<Curve>();
+            var finalCurves = new List<Curve>();
             var splitPoints = new List<Point3d>();
 
-            // Split curves if longer than maxLength
+            // Initial splitting
             foreach (var curve in curves)
             {
                 if (curve.GetLength() > maxLength)
@@ -102,25 +103,21 @@ namespace SpatialGeneration
                     Point3d splitPt;
                     var split = SplitCurveIfTooLong(curve, maxLength, out splitPt);
                     splitCurves.AddRange(split);
-                    splitPoints.Add(splitPt);
+                    if (splitPt != Point3d.Unset)
+                        splitPoints.Add(splitPt);
                 }
                 else
-                    FinalCrvs.Add(curve);
+                {
+                    finalCurves.Add(curve);
+                }
             }
 
-            // Connect split points
-            foreach (var pt in splitPoints)
-            {
-                var closest = ClosestPoint(pt, splitPoints);
-                if (closest != Point3d.Unset)
-                    splitCurves.Add(new Line(pt, closest).ToNurbsCurve());
-            }
-
-            // Loop until all connector and split curves curves are shorter than maxLength
+            // Iterative splitting and connecting
             int iteration = 0;
-            while (splitCurves.Exists(c => c.GetLength() > maxLength) && iteration < 10)
+            while (splitCurves.Exists(c => c.GetLength() > maxLength) && iteration < 100)
             {
-                var nextGen = new List<Curve>();
+                var nextGenCurves = new List<Curve>();
+                var newSplitPoints = new List<Point3d>();
 
                 foreach (var c in splitCurves)
                 {
@@ -128,32 +125,42 @@ namespace SpatialGeneration
                     {
                         Point3d splitPt;
                         var split = SplitCurveIfTooLong(c, maxLength, out splitPt);
-                        nextGen.AddRange(split);
-                        splitPoints.Add(splitPt);
+                        nextGenCurves.AddRange(split);
+                        if (splitPt != Point3d.Unset)
+                            newSplitPoints.Add(splitPt);
                     }
                     else
-                        FinalCrvs.Add(c);
+                    {
+                        finalCurves.Add(c);
+                    }
                 }
 
-                // Connect split points
-                foreach (var pt in splitPoints)
+                // Pairing split points correctly (unique pairs only)
+                var pointsToPair = new List<Point3d>(newSplitPoints);
+                var pairedPoints = new HashSet<Point3d>();
+
+                foreach (var pt in newSplitPoints)
                 {
-                    var closest = ClosestPoint(pt, splitPoints);
+                    if (pairedPoints.Contains(pt)) continue;
+
+                    var potentialMatches = pointsToPair.Where(p => p != pt && !pairedPoints.Contains(p)).ToList();
+                    var closest = ClosestPoint(pt, potentialMatches);
+
                     if (closest != Point3d.Unset)
-                        nextGen.Add(new Line(pt, closest).ToNurbsCurve());
+                    {
+                        nextGenCurves.Add(new Line(pt, closest).ToNurbsCurve());
+                        pairedPoints.Add(pt);
+                        pairedPoints.Add(closest);
+                    }
                 }
 
-                splitCurves = nextGen;
-                splitPoints.Clear();
+                // Prepare for next iteration
+                splitCurves = nextGenCurves;
                 iteration++;
             }
-            FinalCrvs.AddRange(splitCurves);
 
-            // Combine all curves into a single list
-            var allCurves = new List<Curve>();
-            allCurves.AddRange(FinalCrvs);
-
-            return allCurves;
+            finalCurves.AddRange(splitCurves);
+            return finalCurves;
         }
 
         public static float ToSingle(double value)
@@ -195,7 +202,7 @@ namespace SpatialGeneration
             }
         
             
-            voxelSize = ToSingle(voxelSize);
+            /*voxelSize = ToSingle(voxelSize);
 
             var voxel = new List<Box>();
             var grid = new HashSet<Vector3>();
@@ -209,13 +216,13 @@ namespace SpatialGeneration
                 var box = new Box(plane, xInterval, yInterval, zInterval);
                 voxel.Add(box);
               
-            }
+            }*/
             // Compute convex hull
             //Mesh convexHullMesh = Mesh.CreateConvexHull3D(pts, out hullFacets, RhinoDoc.ActiveDoc.ModelAbsoluteTolerance, RhinoDoc.ActiveDoc.ModelAbsoluteTolerance);
 
 
             DA.SetDataList(0, result);
-            DA.SetDataList(1, voxel);
+            //DA.SetDataList(1, voxel);
 
 
 
