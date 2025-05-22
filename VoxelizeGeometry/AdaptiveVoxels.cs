@@ -38,6 +38,8 @@ namespace SpatialGeneration
             pManager.AddIntegerParameter("Resolution", "R", "Base resolution (larger = coarser)", GH_ParamAccess.item, 6);
             pManager.AddNumberParameter("Threshold", "T", "Density threshold for refinement", GH_ParamAccess.item, 0.2);
             pManager.AddIntegerParameter("MaxDepth", "D", "Maximum octree depth", GH_ParamAccess.item, 4);
+            pManager.AddNumberParameter("MinSize", "Min", "Minimum voxel size", GH_ParamAccess.item, 1.0);
+            pManager.AddNumberParameter("MaxSize", "Max", "Maximum voxel size", GH_ParamAccess.item, 100.0);
         }
 
         /// <summary>
@@ -71,12 +73,18 @@ namespace SpatialGeneration
                 IsLeaf = true;
             }
 
-            public void Subdivide(int maxDepth)
+            public void Subdivide(int maxDepth, double minSize)
             {
-                // Prevent all-zero subdivision
-                int targetDepth = Math.Max(1, (int)(Density * maxDepth));
+                // Always allow at least 1 subdivision at root
+                if (Depth >= maxDepth)
+                    return;
 
-                if (Depth >= targetDepth || Depth >= maxDepth)
+                if (Box.X.Length <= minSize)
+                    return;
+
+                // If density is low, avoid refining unless we're still above min size
+                int targetDepth = Math.Max(1, (int)(Density * maxDepth));
+                if (Depth >= targetDepth)
                     return;
 
                 IsLeaf = false;
@@ -84,11 +92,11 @@ namespace SpatialGeneration
 
                 foreach (var sub in subBoxes)
                 {
-                    Point3d center = sub.Center;
-
+                    var center = sub.Center;
                     double newDensity = GradedVoxelGrid.SampleDensitySmooth(center);
+
                     var child = new GradedVoxel(sub, newDensity, Depth + 1);
-                    child.Subdivide(maxDepth);
+                    child.Subdivide(maxDepth, minSize);
                     Children.Add(child);
                 }
             }
@@ -136,26 +144,43 @@ namespace SpatialGeneration
 
             private static readonly List<(Box box, System.Drawing.Color color)> output = new List<(Box box, System.Drawing.Color color)>();
 
-            public static List<(Box box, System.Drawing.Color color)> BuildGradedVoxels(Brep brep, int resolution, int maxDepth)
+            public static List<(Box box, System.Drawing.Color color)> BuildGradedVoxels(
+            Brep brep,
+            int resolution,
+            int maxDepth,
+            double minSize,
+            double maxSize)
             {
                 output.Clear();
 
                 BoundingBox bounds = brep.GetBoundingBox(true);
-                double size = bounds.Diagonal.Length / resolution;
 
-                // Create root voxel as a box from Brep bounds
-                Point3d basePt = bounds.Min;
-                var rootBox = new Box(
-                    new Plane(basePt, Vector3d.XAxis, Vector3d.YAxis),
-                    new Interval(0, bounds.Max.X - basePt.X),
-                    new Interval(0, bounds.Max.Y - basePt.Y),
-                    new Interval(0, bounds.Max.Z - basePt.Z)
-                );
+                var rootBoxes = new List<(Box, double)>();
 
-                var root = new GradedVoxel(rootBox, SampleDensitySmooth(rootBox.Center), 0);
-                root.Subdivide(maxDepth);
+                // Create initial grid of max-size root boxes
+                for (double x = bounds.Min.X; x < bounds.Max.X; x += maxSize)
+                    for (double y = bounds.Min.Y; y < bounds.Max.Y; y += maxSize)
+                        for (double z = bounds.Min.Z; z < bounds.Max.Z; z += maxSize)
+                        {
+                            double dx = Math.Min(maxSize, bounds.Max.X - x);
+                            double dy = Math.Min(maxSize, bounds.Max.Y - y);
+                            double dz = Math.Min(maxSize, bounds.Max.Z - z);
 
-                CollectLeaves(root, brep);
+                            var plane = new Plane(new Point3d(x, y, z), Vector3d.XAxis, Vector3d.YAxis);
+                            var box = new Box(plane, new Interval(0, dx), new Interval(0, dy), new Interval(0, dz));
+                            double density = SampleDensitySmooth(box.Center);
+
+                            rootBoxes.Add((box, density));
+                        }
+
+                // Subdivide and collect voxels
+                foreach (var (box, density) in rootBoxes)
+                {
+                    var root = new GradedVoxel(box, density, 0);
+                    root.Subdivide(maxDepth, minSize);
+                    CollectLeaves(root, brep);
+                }
+
                 return output;
             }
 
@@ -350,6 +375,103 @@ namespace SpatialGeneration
                 }
             }
 
+            public static List<Line> ExtractUniqueTetEdges(List<Mesh> tetMeshes)
+            {
+                var edgeSet = new HashSet<(Point3d, Point3d)>(new UndirectedEdgeComparer());
+
+                foreach (var mesh in tetMeshes)
+                {
+                    var verts = mesh.Vertices;
+                    if (verts.Count != 4) continue;
+
+                    var v = new Point3d[]
+                    {
+                        verts[0],
+                        verts[1],
+                        verts[2],
+                        verts[3]
+                    };
+
+                    // 6 edges of a tetrahedron
+                    var edges = new (Point3d, Point3d)[]
+                    {
+                        (v[0], v[1]),
+                        (v[0], v[2]),
+                        (v[0], v[3]),
+                        (v[1], v[2]),
+                        (v[1], v[3]),
+                        (v[2], v[3])
+                    };
+
+                    foreach (var (a, b) in edges)
+                    {
+                        edgeSet.Add((a, b));
+                    }
+                }
+
+                return edgeSet.Select(e => new Line(e.Item1, e.Item2)).ToList();
+            }
+
+            // Undirected point comparer
+            class UndirectedEdgeComparer : IEqualityComparer<(Point3d, Point3d)>
+            {
+                public bool Equals((Point3d, Point3d) e1, (Point3d, Point3d) e2)
+                {
+                    return (e1.Item1.EpsilonEquals(e2.Item1, 1e-6) && e1.Item2.EpsilonEquals(e2.Item2, 1e-6)) ||
+                           (e1.Item1.EpsilonEquals(e2.Item2, 1e-6) && e1.Item2.EpsilonEquals(e2.Item1, 1e-6));
+                }
+
+                public int GetHashCode((Point3d, Point3d) edge)
+                {
+                    // Order-independent hash
+                    unchecked
+                    {
+                        int h1 = edge.Item1.GetHashCode();
+                        int h2 = edge.Item2.GetHashCode();
+                        return h1 ^ h2;
+                    }
+                }
+            }
+
+            public static List<Line> RemoveNearMidpointDuplicates(List<Line> lines, double threshold = 1e-6)
+            {
+                var kept = new List<Line>();
+                var used = new bool[lines.Count];
+
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    if (used[i]) continue;
+
+                    var midA = lines[i].PointAt(0.5);
+                    bool isDuplicate = false;
+
+                    for (int j = i + 1; j < lines.Count; j++)
+                    {
+                        if (used[j]) continue;
+
+                        var midB = lines[j].PointAt(0.5);
+
+                        if (midA.DistanceToSquared(midB) < threshold * threshold)
+                        {
+                            // Optional: check angle similarity
+                            Vector3d dirA = lines[i].Direction;
+                            Vector3d dirB = lines[j].Direction;
+
+                            if (Vector3d.VectorAngle(dirA, dirB) < 0.1 || Vector3d.VectorAngle(dirA, -dirB) < 0.1)
+                            {
+                                used[j] = true; // drop the second one
+                                isDuplicate = true;
+                            }
+                        }
+                    }
+
+                    if (!isDuplicate)
+                        kept.Add(lines[i]);
+                }
+
+                return kept;
+            }
+
         }
          
         
@@ -362,8 +484,13 @@ namespace SpatialGeneration
             int resolution = 6;
             double threshold = 0.2;
             int maxDepth = 4;
+            
             var outputMeshes = new List<Mesh>();
             var tetMeshes = new List<Mesh>();
+
+            double minSize = 1.0;
+            double maxSize = 100.0;
+            
 
 
 
@@ -372,9 +499,15 @@ namespace SpatialGeneration
             DA.GetData(2, ref resolution);
             DA.GetData(3, ref threshold);
             DA.GetData(4, ref maxDepth);
+            DA.GetData(5, ref minSize);
+            DA.GetData(6, ref maxSize);
+
+            
 
             List<Point3d> points = new List<Point3d>();
             List<Color> colors = new List<Color>();
+
+            //int maxDepth = (int)Math.Ceiling(Math.Log(maxSize / minSize, 2));
 
 
             foreach (var ggoo in geoInputs)
@@ -423,7 +556,7 @@ namespace SpatialGeneration
                 GradedVoxelGrid.DensityField[points[i]] = density;
             }
 
-            var coloredBoxes = GradedVoxelGrid.BuildGradedVoxels(brep, resolution, maxDepth);
+            var coloredBoxes = GradedVoxelGrid.BuildGradedVoxels(brep, resolution, maxDepth, minSize, maxSize);
             AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, $"Generated {coloredBoxes.Count} voxels.");
             var outputBoxes = new List<Box>();
             var outputColors = new List<Color>();
@@ -446,7 +579,12 @@ namespace SpatialGeneration
                 GradedVoxelGrid.PreviewBoxCornerIndices(firstBox);
             }
 
+            var uniqueEdges = GradedVoxelGrid.ExtractUniqueTetEdges(tetMeshes);
+            var cleanEdges = GradedVoxelGrid.RemoveNearMidpointDuplicates(uniqueEdges, 0.01);
+
+
             DA.SetDataList(0, outputBoxes);
+            DA.SetDataList(1, cleanEdges);
             DA.SetDataList(2, outputMeshes);
             DA.SetDataList(3, tetMeshes);
             DA.SetDataList(4, outputColors);
