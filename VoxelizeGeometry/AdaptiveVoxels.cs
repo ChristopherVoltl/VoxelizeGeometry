@@ -8,6 +8,8 @@ using System.Drawing;
 using System.Linq;
 using Rhino.UI;
 using Grasshopper.Kernel.Types;
+using Rhino.Geometry.Intersect;
+using Eto.Forms;
 
 namespace SpatialGeneration
 {
@@ -300,7 +302,7 @@ namespace SpatialGeneration
 
                 foreach (var pt in corners)
                     mesh.Vertices.Add(pt);
-                
+
 
                 // Define 6 quad faces (use correct winding)
                 mesh.Faces.AddFace(0, 1, 2, 3); // bottom
@@ -368,11 +370,11 @@ namespace SpatialGeneration
                 if (corners == null || corners.Length != 8)
                     return;
 
-                for (int i = 0; i < corners.Length; i++)
+                /*for (int i = 0; i < corners.Length; i++)
                 {
                     string label = $"Pt {i}";
                     Rhino.RhinoDoc.ActiveDoc.Objects.AddTextDot(label, corners[i]);
-                }
+                }*/
             }
 
             public static List<Line> ExtractUniqueTetEdges(List<Mesh> tetMeshes)
@@ -471,9 +473,138 @@ namespace SpatialGeneration
 
                 return kept;
             }
+            public static List<Line> DeleteLongerIntersectingLines(List<Line> curves, double tol)
+            {
+                var toRemove = new HashSet<int>(); // indexes of curves to remove
 
+                for (int i = 0; i < curves.Count; i++)
+                {
+                    for (int j = i + 1; j < curves.Count; j++)
+                    {
+                        if (toRemove.Contains(i) || toRemove.Contains(j)) continue;
+
+                        Curve c1 = curves[i].ToNurbsCurve();
+                        Curve c2 = curves[j].ToNurbsCurve();
+                        var events = Rhino.Geometry.Intersect.Intersection.CurveCurve(c1, c2, tol, tol);
+
+                        if (events != null && events.Count > 0)
+                        {
+                            foreach (var ccx in events)
+                            {
+                                Point3d pt = ccx.PointA;
+
+                                bool onEnd1 = pt.DistanceTo(c1.PointAtStart) < tol || pt.DistanceTo(c1.PointAtEnd) < tol;
+                                bool onEnd2 = pt.DistanceTo(c2.PointAtStart) < tol || pt.DistanceTo(c2.PointAtEnd) < tol;
+
+                                // Skip if intersection is only at endpoints
+                                if (onEnd1 || onEnd2)
+                                    continue;
+
+                                // Mark one curve for removal
+                                double len1 = c1.GetLength();
+                                double len2 = c2.GetLength();
+
+                                if (len1 > len2)
+                                    toRemove.Add(i);
+                                else
+                                    toRemove.Add(j);
+
+                                break; // Only need to find one non-endpoint intersection
+                            }
+                        }
+                    }
+                }
+
+                // Build result list
+                var kept = new List<Line>();
+                for (int i = 0; i < curves.Count; i++)
+                {
+                    if (!toRemove.Contains(i))
+                        kept.Add(curves[i]);
+                }
+
+                return kept;
+            }
+
+            private static bool BoundingBoxesIntersect(BoundingBox a, BoundingBox b)
+            {
+                return (a.Max.X >= b.Min.X && a.Min.X <= b.Max.X) &&
+                       (a.Max.Y >= b.Min.Y && a.Min.Y <= b.Max.Y) &&
+                       (a.Max.Z >= b.Min.Z && a.Min.Z <= b.Max.Z);
+            }
+
+            public static List<Curve> FilterIntersectingCurves(List<Curve> curves, double tolerance)
+            {
+                int n = curves.Count;
+                var toRemove = new HashSet<int>();
+
+                // Precompute bounding boxes
+                BoundingBox[] bboxes = new BoundingBox[n];
+                for (int i = 0; i < n; i++)
+                    bboxes[i] = curves[i].GetBoundingBox(true);
+
+                for (int i = 0; i < n; i++)
+                {
+                    if (toRemove.Contains(i))
+                        continue;
+
+                    Curve c1 = curves[i];
+
+                    for (int j = i + 1; j < n; j++)
+                    {
+                        if (toRemove.Contains(j))
+                            continue;
+
+                        // Bounding box filter
+                        if (!BoundingBoxesIntersect(bboxes[i], bboxes[j]))
+                            continue;
+
+                        Curve c2 = curves[j];
+
+                        // Use Rhino's intersection API
+                        var events = Intersection.CurveCurve(c1, c2, tolerance, tolerance);
+
+                        if (events == null && events.Count == 0)
+                            continue;
+
+                        foreach (var x in events)
+                        {
+                            Point3d pt = x.PointA;
+
+                            // Tolerance-aware endpoint checks
+                            bool isEndOnC1 = pt.DistanceTo(c1.PointAtStart) < tolerance || pt.DistanceTo(c1.PointAtEnd) < tolerance;
+                            bool isEndOnC2 = pt.DistanceTo(c2.PointAtStart) < tolerance || pt.DistanceTo(c2.PointAtEnd) < tolerance;
+
+                            if (isEndOnC1 && isEndOnC2)
+                                continue; // Skip pure endpoint intersection
+
+                            // Decide which one to remove
+                            double len1 = c1.GetLength();
+                            double len2 = c2.GetLength();
+
+                            if (len1 > len2)
+                                toRemove.Add(i);
+                            else
+                                toRemove.Add(j);
+
+                            break; // Only process one valid intersection per pair
+                        }
+                    }
+                }
+
+                // Return only the kept curves
+                var result = new List<Curve>();
+                for (int i = 0; i < n; i++)
+                {
+                    if (!toRemove.Contains(i))
+                        result.Add(curves[i]);
+                }
+
+                return result;
+            }
         }
-         
+
+
         
 
 
@@ -582,9 +713,18 @@ namespace SpatialGeneration
             var uniqueEdges = GradedVoxelGrid.ExtractUniqueTetEdges(tetMeshes);
             var cleanEdges = GradedVoxelGrid.RemoveNearMidpointDuplicates(uniqueEdges, 0.01);
 
+            List<Curve> curves = new List<Curve>();
+
+            // Convert lines to curves
+            foreach (var line in cleanEdges)
+            {
+                curves.Add(line.ToNurbsCurve()); // or line.ToCurve() if using newer RhinoCommon
+            }
+            List<Curve> cleaned = GradedVoxelGrid.FilterIntersectingCurves(curves, 0.01);
+
 
             DA.SetDataList(0, outputBoxes);
-            DA.SetDataList(1, cleanEdges);
+            DA.SetDataList(1, cleaned);
             DA.SetDataList(2, outputMeshes);
             DA.SetDataList(3, tetMeshes);
             DA.SetDataList(4, outputColors);
